@@ -11,6 +11,7 @@ export interface AutocompleteRequest {
   text: string;
   cursor_position: number;
   context_window?: number;
+  specialty?: string;
 }
 
 export interface AutocompleteResponse {
@@ -21,6 +22,7 @@ export interface AutocompleteResponse {
   loinc_code: string | null;
   confidence: number;
   lab_flag: string | null;
+  specialty: string | null;
   message?: string;
 }
 
@@ -30,7 +32,8 @@ export interface HealthResponse {
   trie_term_count: number;
   abbreviation_count: number;
   lab_ranges_count: number;
-  llm_available: boolean;
+  ollama_available: boolean;
+  umls_available: boolean;
   version: string;
 }
 
@@ -43,7 +46,7 @@ export async function fetchAutocomplete(
   signal?: AbortSignal
 ): Promise<AutocompleteResponse | null> {
   try {
-    const response = await fetch(`${API_BASE}/autocomplete`, {
+    const response = await fetch(`${API_BASE}/api/v1/suggest`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),

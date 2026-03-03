@@ -1,12 +1,32 @@
 # ── Clinical Copilot Engine — Docker Compose ────────────────────────
-# Full stack: Frontend + Backend + vLLM (BioMistral-7B)
+# Full stack: Frontend + Backend + Ollama (BioMistral-7B Q4 CPU)
 #
 # Usage:
 #   docker compose up --build           # Start all services
 #   docker compose up backend           # Backend only (dev)
-#   docker compose --profile gpu up     # Include vLLM (requires NVIDIA GPU)
+#
+# After first `docker compose up`, run:
+#   ./scripts/pull_model.sh             # One-time ~4.4 GB download
 
 services:
+
+  # ── Ollama (BioMistral-7B Q4 CPU) ─────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: copilot-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - copilot-net
 
   # ── Backend (FastAPI) ─────────────────────────────────────────────
   backend:
@@ -20,8 +40,12 @@ services:
       - .env
     environment:
       - DATA_DIR=/app/data
+      - OLLAMA_URL=http://ollama:11434
     volumes:
       - ./data:/app/data:ro
+    depends_on:
+      ollama:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()"]
@@ -49,34 +73,8 @@ services:
     networks:
       - copilot-net
 
-  # ── vLLM (BioMistral-7B) — GPU required ─────────────────────────
-  # Activate with: docker compose --profile gpu up
-  vllm:
-    image: vllm/vllm-openai:latest
-    container_name: copilot-vllm
-    profiles:
-      - gpu
-    ports:
-      - "8001:8001"
-    environment:
-      - MODEL_NAME=BioMistral/BioMistral-7B-GPTQ
-    command: >
-      --model BioMistral/BioMistral-7B-GPTQ
-      --quantization gptq
-      --dtype half
-      --max-model-len 2048
-      --port 8001
-      --host 0.0.0.0
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    restart: unless-stopped
-    networks:
-      - copilot-net
+volumes:
+  ollama_data:
 
 networks:
   copilot-net:

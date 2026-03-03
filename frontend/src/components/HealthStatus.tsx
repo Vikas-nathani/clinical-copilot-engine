@@ -63,13 +63,22 @@ export default function HealthStatus() {
         <span className="font-medium">{health.lab_ranges_count}</span> lab ranges
       </span>
       <span className="flex items-center gap-1">
-        LLM:
+        Ollama:
         <span
           className={`h-2 w-2 rounded-full ${
-            health.llm_available ? "bg-emerald-500" : "bg-gray-300"
+            health.ollama_available ? "bg-emerald-500" : "bg-gray-300"
           }`}
         />
-        {health.llm_available ? "Online" : "Offline"}
+        {health.ollama_available ? "Online" : "Offline"}
+      </span>
+      <span className="flex items-center gap-1">
+        UMLS:
+        <span
+          className={`h-2 w-2 rounded-full ${
+            health.umls_available ? "bg-emerald-500" : "bg-gray-300"
+          }`}
+        />
+        {health.umls_available ? "Active" : "Inactive"}
       </span>
       <span className="text-gray-300">|</span>
       <span className="text-gray-400">v{health.version}</span>

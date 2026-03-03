@@ -7,7 +7,7 @@ export default defineConfig({
     port: 3000,
     host: true,
     proxy: {
-      "/autocomplete": {
+      "/api": {
         target: "http://localhost:8000",
         changeOrigin: true,
       },

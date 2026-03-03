@@ -1,19 +1,20 @@
 """
-API Routes — POST /autocomplete + GET /health.
+API Routes — POST /api/v1/suggest + GET /api/v1/suggest/stream + GET /health.
 
 Thin transport layer. All business logic lives in the Orchestrator.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Union
 
-from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Query, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.schemas.models import (
-    AutocompleteRequest,
+    SuggestRequest,
     AutocompleteResponse,
     EmptyResponse,
     ErrorResponse,
@@ -27,7 +28,7 @@ router = APIRouter()
 
 
 @router.post(
-    "/autocomplete",
+    "/api/v1/suggest",
     response_model=Union[AutocompleteResponse, EmptyResponse],
     responses={
         200: {"description": "Suggestion returned successfully"},
@@ -40,12 +41,12 @@ router = APIRouter()
         "a real-time autocomplete suggestion via the 4-stage waterfall pipeline."
     ),
 )
-async def autocomplete(
-    payload: AutocompleteRequest,
+async def suggest(
+    payload: SuggestRequest,
     request: Request,
 ) -> Union[AutocompleteResponse, EmptyResponse]:
     """
-    Main autocomplete endpoint.
+    Main suggest endpoint.
 
     The orchestrator is attached to app.state during startup (lifespan).
     """
@@ -54,11 +55,48 @@ async def autocomplete(
         result = await orchestrator.suggest(payload)
         return result
     except Exception as e:
-        logger.error("Autocomplete error: %s", e, exc_info=True)
+        logger.error("Suggest error: %s", e, exc_info=True)
         return JSONResponse(
             status_code=500,
             content={"error": "Internal server error", "detail": str(e)},
         )
+
+
+@router.get(
+    "/api/v1/suggest/stream",
+    summary="Stream LLM tokens via SSE",
+    description=(
+        "Streams Server-Sent Events with individual tokens from the LLM. "
+        "Useful for real-time typewriter-style completions."
+    ),
+)
+async def suggest_stream(
+    request: Request,
+    text: str = Query(..., min_length=1, max_length=5000, description="Clinical note text"),
+    context_window: int = Query(default=200, ge=10, le=1000),
+):
+    """Stream LLM tokens as Server-Sent Events."""
+    llm_client = request.app.state.llm_client
+
+    async def event_generator():
+        try:
+            async for token in llm_client.stream(text, context_window):
+                data = json.dumps({"token": token})
+                yield f"data: {data}\n\n"
+            yield "data: [DONE]\n\n"
+        except Exception as e:
+            logger.error("Stream error: %s", e, exc_info=True)
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get(
@@ -73,6 +111,7 @@ async def health(request: Request) -> HealthResponse:
     dictionary = request.app.state.dictionary
     lab_engine = request.app.state.lab_engine
     llm_client = request.app.state.llm_client
+    umls_service = request.app.state.umls_service
 
     return HealthResponse(
         status="healthy",
@@ -80,6 +119,7 @@ async def health(request: Request) -> HealthResponse:
         trie_term_count=dictionary.trie_term_count,
         abbreviation_count=dictionary.abbreviation_count,
         lab_ranges_count=lab_engine.lab_ranges_count,
-        llm_available=llm_client.is_available,
+        ollama_available=llm_client.is_available,
+        umls_available=umls_service.is_available,
         version=settings.app_version,
     )

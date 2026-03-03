@@ -11,7 +11,7 @@ import {
   type AutocompleteResponse,
 } from "../services/api";
 
-const DEFAULT_DEBOUNCE_MS = 150;
+const DEFAULT_DEBOUNCE_MS = 300;
 const MIN_PREFIX_LENGTH = 2;
 
 interface UseAutocompleteOptions {

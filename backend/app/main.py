@@ -17,7 +17,7 @@ from fastapi import FastAPI
 from app.api.autocomplete import router as autocomplete_router
 from app.core.config import get_settings
 from app.core.middleware import setup_middleware
-from app.services.dictionary import DictionaryService
+from app.services.dictionary import DictionaryService, UMLSApiService
 from app.services.lab_engine import LabEngine
 from app.services.llm_client import LLMClient
 from app.services.orchestrator import Orchestrator
@@ -86,21 +86,25 @@ async def lifespan(app: FastAPI):
     dictionary = DictionaryService()
     lab_engine = LabEngine()
     llm_client = LLMClient()
+    umls_service = UMLSApiService()
 
     await dictionary.load()
     await lab_engine.load()
     await llm_client.initialize()
+    await umls_service.initialize()
 
     orchestrator = Orchestrator(
         dictionary=dictionary,
         lab_engine=lab_engine,
         llm_client=llm_client,
+        umls_service=umls_service,
     )
 
     # Attach to app.state for access in route handlers
     app.state.dictionary = dictionary
     app.state.lab_engine = lab_engine
     app.state.llm_client = llm_client
+    app.state.umls_service = umls_service
     app.state.orchestrator = orchestrator
 
     logger.info(
@@ -117,6 +121,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down Clinical Copilot Engine...")
     await llm_client.shutdown()
+    await umls_service.shutdown()
     logger.info("Shutdown complete.")
 
 
