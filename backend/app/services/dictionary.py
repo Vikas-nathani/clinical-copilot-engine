@@ -613,8 +613,8 @@ class UMLSApiService:
             logger.debug("UMLS API HTTP error: %s", e.response.status_code)
             return None
         except Exception as e:
-            logger.debug("UMLS API error: %s", e)
-            return None
+            logger.warning("UMLS stage error full details: %s", repr(e))
+            return []
 
     async def _get_codes(
         self, cui: str
