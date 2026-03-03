@@ -14,6 +14,7 @@ AutocompleteResponse for the API layer.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Optional, Union
 
@@ -176,9 +177,10 @@ class Orchestrator:
             suggestion = best_term
 
         if not suggestion:
-            # Token exactly matches a term — no completion needed
-            # But still return the code information
-            suggestion = ""
+            # Token exactly matches a term — no further completion possible.
+            # Return None so the pipeline falls through to the next stage
+            # (lab engine / LLM) rather than short-circuiting with an empty result.
+            return None
 
         return AutocompleteResponse(
             suggestion=suggestion,
@@ -239,7 +241,6 @@ class Orchestrator:
             return ""
 
         # Split on whitespace and common delimiters, keep the last token
-        import re
         tokens = re.split(r"[\s,;]+", text)
         return tokens[-1] if tokens else ""
 

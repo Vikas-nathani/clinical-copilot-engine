@@ -17,14 +17,14 @@ async def test_health_endpoint(client):
     assert "trie_loaded" in data
     assert "abbreviation_count" in data
     assert "lab_ranges_count" in data
-    assert "llm_available" in data
+    assert "ollama_available" in data
     assert "version" in data
 
 
 @pytest.mark.asyncio
 async def test_autocomplete_abbreviation(client, sample_abbreviation_request):
     """POST /autocomplete with 'htn' returns abbreviation expansion."""
-    response = await client.post("/autocomplete", json=sample_abbreviation_request)
+    response = await client.post("/api/v1/suggest", json=sample_abbreviation_request)
     assert response.status_code == 200
     data = response.json()
     assert data["suggestion"] == "hypertension"
@@ -36,7 +36,7 @@ async def test_autocomplete_abbreviation(client, sample_abbreviation_request):
 @pytest.mark.asyncio
 async def test_autocomplete_trie(client, sample_trie_request):
     """POST /autocomplete with 'diab' returns trie prefix match."""
-    response = await client.post("/autocomplete", json=sample_trie_request)
+    response = await client.post("/api/v1/suggest", json=sample_trie_request)
     assert response.status_code == 200
     data = response.json()
     assert data["source"] in ("trie", "abbreviation")
@@ -46,7 +46,7 @@ async def test_autocomplete_trie(client, sample_trie_request):
 @pytest.mark.asyncio
 async def test_autocomplete_lab_warning(client, sample_lab_request):
     """POST /autocomplete with 'Glucose: 35' returns lab warning."""
-    response = await client.post("/autocomplete", json=sample_lab_request)
+    response = await client.post("/api/v1/suggest", json=sample_lab_request)
     assert response.status_code == 200
     data = response.json()
     assert data["source"] == "lab_engine"
@@ -57,7 +57,7 @@ async def test_autocomplete_lab_warning(client, sample_lab_request):
 @pytest.mark.asyncio
 async def test_autocomplete_empty_input(client, sample_empty_request):
     """POST /autocomplete with whitespace-only text returns empty."""
-    response = await client.post("/autocomplete", json=sample_empty_request)
+    response = await client.post("/api/v1/suggest", json=sample_empty_request)
     assert response.status_code == 200
     data = response.json()
     assert data["suggestion"] is None
@@ -66,7 +66,7 @@ async def test_autocomplete_empty_input(client, sample_empty_request):
 @pytest.mark.asyncio
 async def test_autocomplete_validation_error(client):
     """POST /autocomplete with invalid payload returns 422."""
-    response = await client.post("/autocomplete", json={"text": "", "cursor_position": 0})
+    response = await client.post("/api/v1/suggest", json={"text": "", "cursor_position": 0})
     assert response.status_code == 422
 
 
@@ -74,7 +74,7 @@ async def test_autocomplete_validation_error(client):
 async def test_autocomplete_cursor_exceeds_text(client):
     """POST /autocomplete with cursor > text length returns 422."""
     response = await client.post(
-        "/autocomplete",
+        "/api/v1/suggest",
         json={"text": "hello", "cursor_position": 100},
     )
     assert response.status_code == 422

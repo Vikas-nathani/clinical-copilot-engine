@@ -27,4 +27,4 @@ python-dotenv==1.0.1
 # ── Testing ────────────────────────────────────────────
 pytest==8.3.4
 pytest-asyncio==0.24.0
-httpx  # also used as test client via `AsyncClient`
+# httpx is already pinned above (httpx==0.28.1); it doubles as the test client via AsyncClient
