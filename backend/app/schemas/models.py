@@ -20,6 +20,7 @@ class SuggestionSource(str, Enum):
     """Where the autocomplete suggestion originated."""
     ABBREVIATION = "abbreviation"
     TRIE = "trie"
+    UMLS = "umls"
     LAB_ENGINE = "lab_engine"
     LLM = "llm"
 

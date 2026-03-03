@@ -10,15 +10,15 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from typing import Callable
+from typing import Any
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.core.config import get_settings
 
@@ -40,59 +40,74 @@ def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> Res
     )
 
 
-# ── Request Timing + Logging Middleware ─────────────────────────────
+# ── Request Timing + Logging Middleware (pure ASGI) ────────────────
+# Uses raw ASGI instead of BaseHTTPMiddleware to avoid buffering
+# streaming responses (SSE).
 
 
-class RequestLoggingMiddleware(BaseHTTPMiddleware):
+class RequestLoggingMiddleware:
     """
-    Adds structured request/response logging with:
+    Pure ASGI middleware for structured request/response logging.
+
+    Unlike BaseHTTPMiddleware, this does NOT buffer the response body,
+    so SSE/streaming endpoints work correctly.
+
+    Adds:
     - Unique request ID
     - Method, path, status code
     - Response time in milliseconds
     """
 
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        request_id = str(uuid.uuid4())[:8]
-        request.state.request_id = request_id
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
 
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        request_id = str(uuid.uuid4())[:8]
+        method = scope.get("method", "?")
+        path = scope.get("path", "?")
         start = time.perf_counter()
 
         # Log incoming request
-        logger.info(
-            "[%s] %s %s",
-            request_id,
-            request.method,
-            request.url.path,
-        )
+        logger.info("[%s] %s %s", request_id, method, path)
+
+        # Store request_id in scope state for downstream access
+        scope.setdefault("state", {})
+        scope["state"]["request_id"] = request_id
+
+        status_code = 500  # default if headers never sent
+
+        async def send_wrapper(message: Any) -> None:
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = message.get("status", 500)
+                # Inject timing headers
+                headers = list(message.get("headers", []))
+                elapsed = (time.perf_counter() - start) * 1000
+                headers.append((b"x-request-id", request_id.encode()))
+                headers.append((b"x-response-time-ms", f"{elapsed:.1f}".encode()))
+                message["headers"] = headers
+            await send(message)
 
         try:
-            response = await call_next(request)
+            await self.app(scope, receive, send_wrapper)
         except Exception as e:
             elapsed = (time.perf_counter() - start) * 1000
             logger.error(
                 "[%s] %s %s → 500 (%.1fms) ERROR: %s",
-                request_id, request.method, request.url.path, elapsed, e,
+                request_id, method, path, elapsed, e,
             )
             raise
 
         elapsed = (time.perf_counter() - start) * 1000
-
-        # Add timing header
-        response.headers["X-Request-ID"] = request_id
-        response.headers["X-Response-Time-Ms"] = f"{elapsed:.1f}"
-
-        # Log response
-        log_fn = logger.info if response.status_code < 400 else logger.warning
+        log_fn = logger.info if status_code < 400 else logger.warning
         log_fn(
             "[%s] %s %s → %d (%.1fms)",
-            request_id,
-            request.method,
-            request.url.path,
-            response.status_code,
-            elapsed,
+            request_id, method, path, status_code, elapsed,
         )
-
-        return response
 
 
 # ── Setup Function ──────────────────────────────────────────────────
@@ -105,17 +120,17 @@ def setup_middleware(app: FastAPI) -> None:
     """
     settings = get_settings()
 
-    # 1. CORS
+    # 1. CORS — explicit headers instead of wildcard
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["*"],
+        allow_headers=["Content-Type", "Accept", "X-Request-ID"],
         expose_headers=["X-Request-ID", "X-Response-Time-Ms"],
     )
 
-    # 2. Request logging + timing
+    # 2. Request logging + timing (pure ASGI — safe for SSE streaming)
     app.add_middleware(RequestLoggingMiddleware)
 
     # 3. Rate limiting

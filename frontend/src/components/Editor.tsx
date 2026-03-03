@@ -40,6 +40,7 @@ const editorConfig = {
 const SOURCE_STYLES: Record<string, { bg: string; label: string }> = {
   abbreviation: { bg: "bg-emerald-100 text-emerald-800", label: "Abbreviation" },
   trie: { bg: "bg-blue-100 text-blue-800", label: "Medical Term" },
+  umls: { bg: "bg-cyan-100 text-cyan-800", label: "UMLS Concept" },
   lab_engine: { bg: "bg-amber-100 text-amber-800", label: "Lab Warning" },
   llm: { bg: "bg-purple-100 text-purple-800", label: "AI Suggestion" },
 };
