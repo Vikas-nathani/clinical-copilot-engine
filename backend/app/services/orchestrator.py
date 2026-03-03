@@ -147,14 +147,14 @@ class Orchestrator:
 
             return AutocompleteResponse(
                 suggestion=suggestion,
-                source=SuggestionSource.TRIE,
+                source=SuggestionSource.UMLS,
                 icd_code=icd_code,
                 snomed_code=snomed_code,
                 loinc_code=loinc_code,
                 confidence=0.95,
             )
         except Exception as e:
-            logger.debug("UMLS stage error: %s", e)
+            logger.warning("UMLS stage error: %s", e)
             return None
 
     def _stage_trie(
