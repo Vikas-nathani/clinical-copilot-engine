@@ -12,21 +12,15 @@ services:
 
   # ── Ollama (BioMistral-7B Q4 CPU) ─────────────────────────────────
   ollama:
-    image: ollama/ollama:latest
-    container_name: copilot-ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
-    networks:
-      - copilot-net
+  image: ollama/ollama:latest
+  container_name: copilot-ollama
+  ports:
+    - "11434:11434"
+  volumes:
+    - ollama_data:/root/.ollama
+  restart: unless-stopped
+  networks:
+    - copilot-net
 
   # ── Backend (FastAPI) ─────────────────────────────────────────────
   backend:
