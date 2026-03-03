@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Lexical editor overrides */
+.ContentEditable__root {
+  outline: none;
+}
+
+/* Smooth ghost-text transitions */
+.ghost-text {
+  transition: opacity 0.15s ease;
+}
+
+/* Custom scrollbar for the editor */
+.ContentEditable__root::-webkit-scrollbar {
+  width: 6px;
+}
+
+.ContentEditable__root::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ContentEditable__root::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+
+.ContentEditable__root::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
