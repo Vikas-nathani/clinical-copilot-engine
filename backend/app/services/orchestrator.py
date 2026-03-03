@@ -14,6 +14,7 @@ AutocompleteResponse for the API layer.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Optional, Union
 
@@ -29,6 +30,9 @@ from app.services.lab_engine import LabEngine, Severity
 from app.services.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
+
+# Pre-compiled regex for token splitting (avoids recompilation per request)
+_TOKEN_SPLIT_RE = re.compile(r"[\s,;]+")
 
 
 class Orchestrator:
@@ -180,9 +184,8 @@ class Orchestrator:
             suggestion = best_term
 
         if not suggestion:
-            # Token exactly matches a term — no completion needed
-            # But still return the code information
-            suggestion = ""
+            # Token exactly matches a term — no completion to offer
+            return None
 
         return AutocompleteResponse(
             suggestion=suggestion,
@@ -243,8 +246,7 @@ class Orchestrator:
             return ""
 
         # Split on whitespace and common delimiters, keep the last token
-        import re
-        tokens = re.split(r"[\s,;]+", text)
+        tokens = _TOKEN_SPLIT_RE.split(text)
         return tokens[-1] if tokens else ""
 
     @staticmethod
