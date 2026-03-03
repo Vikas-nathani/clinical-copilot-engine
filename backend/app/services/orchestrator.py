@@ -145,6 +145,10 @@ class Orchestrator:
             else:
                 suggestion = best_term
 
+            # Guard: skip empty suggestions (exact match, nothing to complete)
+            if not suggestion:
+                return None
+
             return AutocompleteResponse(
                 suggestion=suggestion,
                 source=SuggestionSource.UMLS,
