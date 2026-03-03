@@ -1,0 +1,30 @@
+# ── Core Framework ──────────────────────────────────────
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.3
+pydantic-settings==2.7.0
+
+# ── Async HTTP (for vLLM calls) ────────────────────────
+httpx==0.28.1
+
+# ── Medical Dictionary (MARISA-Trie) ───────────────────
+marisa-trie==1.2.1
+
+# ── Rate Limiting ──────────────────────────────────────
+slowapi==0.1.9
+
+# ── Structured Logging ─────────────────────────────────
+structlog==24.4.0
+python-json-logger==2.0.7
+
+# ── Data Processing (for download_data.py) ─────────────
+pandas==2.2.3
+requests==2.32.3
+
+# ── Environment Variables ──────────────────────────────
+python-dotenv==1.0.1
+
+# ── Testing ────────────────────────────────────────────
+pytest==8.3.4
+pytest-asyncio==0.24.0
+httpx  # also used as test client via `AsyncClient`

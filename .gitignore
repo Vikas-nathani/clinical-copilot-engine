@@ -1,0 +1,57 @@
+# ── Python ──────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# ── Virtual Environments ───────────────────────────────────────────
+venv/
+.venv/
+env/
+ENV/
+
+# ── Environment Variables ──────────────────────────────────────────
+.env
+.env.local
+.env.production
+
+# ── IDE ─────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.windsurf/
+
+# ── OS ──────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Node / Frontend ────────────────────────────────────────────────
+node_modules/
+frontend/dist/
+frontend/build/
+.pnpm-store/
+
+# ── Data (raw downloads can be large) ──────────────────────────────
+data/raw/*.zip
+data/raw/*.gz
+
+# ── Compiled data (regeneratable, but keep in repo for convenience)
+# Uncomment the next line to exclude compiled data from version control:
+# data/compiled/
+
+# ── Docker ──────────────────────────────────────────────────────────
+*.log
+
+# ── Testing ─────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/

@@ -1,0 +1,83 @@
+# ── Clinical Copilot Engine — Docker Compose ────────────────────────
+# Full stack: Frontend + Backend + vLLM (BioMistral-7B)
+#
+# Usage:
+#   docker compose up --build           # Start all services
+#   docker compose up backend           # Backend only (dev)
+#   docker compose --profile gpu up     # Include vLLM (requires NVIDIA GPU)
+
+services:
+
+  # ── Backend (FastAPI) ─────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: scripts/Dockerfile
+    container_name: copilot-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - DATA_DIR=/app/data
+    volumes:
+      - ./data:/app/data:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - copilot-net
+
+  # ── Frontend (React + Vite) ──────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: copilot-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_API_BASE_URL=http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - copilot-net
+
+  # ── vLLM (BioMistral-7B) — GPU required ─────────────────────────
+  # Activate with: docker compose --profile gpu up
+  vllm:
+    image: vllm/vllm-openai:latest
+    container_name: copilot-vllm
+    profiles:
+      - gpu
+    ports:
+      - "8001:8001"
+    environment:
+      - MODEL_NAME=BioMistral/BioMistral-7B-GPTQ
+    command: >
+      --model BioMistral/BioMistral-7B-GPTQ
+      --quantization gptq
+      --dtype half
+      --max-model-len 2048
+      --port 8001
+      --host 0.0.0.0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    networks:
+      - copilot-net
+
+networks:
+  copilot-net:
+    driver: bridge
