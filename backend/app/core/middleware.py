@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -135,4 +136,5 @@ def setup_middleware(app: FastAPI) -> None:
 
     # 3. Rate limiting
     app.state.limiter = limiter
+    app.add_middleware(SlowAPIMiddleware)
     app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
