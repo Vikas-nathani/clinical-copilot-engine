@@ -14,6 +14,7 @@ Features:
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import AsyncGenerator, Optional
 
@@ -175,7 +176,6 @@ class LLMClient:
                 "POST", "/api/chat", json=payload, timeout=stream_timeout
             ) as response:
                 response.raise_for_status()
-                import json
                 async for line in response.aiter_lines():
                     if not line.strip():
                         continue
