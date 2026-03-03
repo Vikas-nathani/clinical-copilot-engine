@@ -30,12 +30,12 @@
 
 **Clinical Copilot Engine** is a production-grade autocomplete system designed for doctors writing clinical notes. As a clinician types, the system suggests:
 
-- **Medical terms** via instant trie-based prefix matching
+- **Medical terms** via UMLS REST API live lookup (primary) and instant trie-based prefix matching (fallback)
 - **ICD-10 codes** mapped to recognized medical concepts
 - **Abnormal lab value warnings** via rule-based pattern detection
-- **Full sentence completions** via BioMistral-7B (4-bit quantized) as a fallback
+- **Full sentence completions** via BioMistral-7B on Ollama (CPU-friendly Q4 quant) as a fallback
 
-The system prioritizes **speed** (trie lookups < 1ms) and **accuracy** (clinically validated dictionaries), falling back to AI generation only when deterministic methods cannot provide a suggestion.
+The system prioritizes **speed** (trie lookups < 1ms) and **accuracy** (clinically validated dictionaries + UMLS live lookup), falling back to AI generation only when deterministic methods cannot provide a suggestion.
 
 ---
 
@@ -47,8 +47,8 @@ The system prioritizes **speed** (trie lookups < 1ms) and **accuracy** (clinical
 │  ┌───────────────────────────────────────────────────────────────┐  │
 │  │              Lexical Editor (Rich Text + Ghost Text)          │  │
 │  │  ┌─────────────┐  ┌──────────────┐  ┌────────────────────┐  │  │
-│  │  │ Keystroke    │→ │ Debounce     │→ │ POST /autocomplete │  │  │
-│  │  │ Listener     │  │ (150ms)      │  │ (Async Fetch)      │  │  │
+│  │  │ Keystroke    │→ │ Debounce     │→ │POST /api/v1/suggest│  │  │
+│  │  │ Listener     │  │ (300ms)      │  │ (Async Fetch)      │  │  │
 │  │  └─────────────┘  └──────────────┘  └────────┬───────────┘  │  │
 │  │                                               │              │  │
 │  │  ┌────────────────────────────────────────────▼───────────┐  │  │
@@ -63,18 +63,21 @@ The system prioritizes **speed** (trie lookups < 1ms) and **accuracy** (clinical
 │                                                                     │
 │  ┌──────────────┐    ┌──────────────────────────────────────────┐  │
 │  │  POST        │    │          ORCHESTRATOR SERVICE             │  │
-│  │  /autocomplete│──→│  (Waterfall Logic - Sequential Stages)   │  │
-│  └──────────────┘    │                                          │  │
-│                      │  Stage 1: Abbreviation Map Lookup        │  │
+│  │ /api/v1/     │──→ │  (Waterfall Logic - Sequential Stages)   │  │
+│  │  suggest     │    │                                          │  │
+│  └──────────────┘    │  Stage 1: Abbreviation Map Lookup        │  │
 │                      │      │ miss                              │  │
 │                      │      ▼                                   │  │
-│                      │  Stage 2: MARISA-Trie Prefix Search      │  │
+│                      │  Stage 2a: UMLS REST API (primary)       │  │
+│                      │      │ miss / error                      │  │
+│                      │      ▼                                   │  │
+│                      │  Stage 2b: MARISA-Trie (fallback)        │  │
 │                      │      │ miss                              │  │
 │                      │      ▼                                   │  │
 │                      │  Stage 3: Lab Pattern Engine              │  │
 │                      │      │ miss                              │  │
 │                      │      ▼                                   │  │
-│                      │  Stage 4: BioMistral-7B (vLLM)           │  │
+│                      │  Stage 4: BioMistral-7B (Ollama)         │  │
 │                      └──────────────────────────────────────────┘  │
 │                                                                     │
 │  ┌────────────────────────────────────────────────────────────────┐ │
@@ -82,10 +85,10 @@ The system prioritizes **speed** (trie lookups < 1ms) and **accuracy** (clinical
 │  │  ┌──────────────┐ ┌────────────┐ ┌──────────┐ ┌───────────┐  │ │
 │  │  │ dictionary.py│ │lab_engine  │ │llm_client│ │orchestrator│  │ │
 │  │  │              │ │.py         │ │.py       │ │.py         │  │ │
-│  │  │• Abbrev Map  │ │• Regex     │ │• vLLM    │ │• Waterfall │  │ │
-│  │  │• MARISA-Trie │ │  Patterns  │ │  Client  │ │  Control   │  │ │
-│  │  │• ICD-10 Map  │ │• Normal    │ │• Async   │ │• Response  │  │ │
-│  │  │• SNOMED Map  │ │  Ranges    │ │  HTTP    │ │  Assembly  │  │ │
+│  │  │• Abbrev Map  │ │• Regex     │ │• Ollama  │ │• Waterfall │  │ │
+│  │  │• UMLS API    │ │  Patterns  │ │  Client  │ │  Control   │  │ │
+│  │  │• MARISA-Trie │ │• Normal    │ │• Async   │ │• Response  │  │ │
+│  │  │• ICD-10 Map  │ │  Ranges    │ │  HTTP    │ │  Assembly  │  │ │
 │  │  └──────────────┘ └────────────┘ └──────────┘ └───────────┘  │ │
 │  └────────────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────┬──────────────────────────────────┘
@@ -93,13 +96,13 @@ The system prioritizes **speed** (trie lookups < 1ms) and **accuracy** (clinical
               ┌────────────────────┼────────────────────┐
               ▼                    ▼                    ▼
 ┌──────────────────┐  ┌─────────────────┐  ┌─────────────────────┐
-│   Data Layer     │  │   vLLM Server   │  │   External APIs     │
-│                  │  │                 │  │   (Future)          │
-│ • MARISA-Trie    │  │ • BioMistral-7B │  │                     │
-│   (compiled)     │  │   (4-bit GPTQ)  │  │ • UMLS API          │
-│ • ICD-10 JSON    │  │ • GPU-accelerated│  │ • RxNorm            │
-│ • SNOMED JSON    │  │ • OpenAI-compat │  │ • NLM Services      │
-│ • LOINC JSON     │  │   API           │  │                     │
+│   Data Layer     │  │  Ollama Server  │  │   External APIs     │
+│                  │  │                 │  │                     │
+│ • MARISA-Trie    │  │ • BioMistral-7B │  │ • UMLS REST API     │
+│   (compiled)     │  │   (Q4 quant)   │  │   (live lookup)     │
+│ • ICD-10 JSON    │  │ • CPU-friendly  │  │ • RxNorm            │
+│ • SNOMED JSON    │  │ • /api/chat     │  │ • NLM Services      │
+│ • LOINC JSON     │  │                 │  │                     │
 │ • Abbrev JSON    │  │                 │  │                     │
 └──────────────────┘  └─────────────────┘  └─────────────────────┘
 ```
@@ -113,9 +116,10 @@ The orchestrator executes these stages **in strict sequential order**, returning
 | Stage | Source | Latency | Description |
 |-------|--------|---------|-------------|
 | **1** | Abbreviation Map | < 0.1ms | Static dictionary lookup. Maps common clinical abbreviations to full terms (e.g., `htn` → `hypertension`, `dm2` → `diabetes mellitus type 2`). |
-| **2** | MARISA-Trie | < 1ms | Prefix search against a compiled trie of ~500K+ medical terms from ICD-10, SNOMED-CT, and LOINC. Returns the best match + ICD-10/SNOMED code if available. |
+| **2a** | UMLS REST API | 50–200ms | Live lookup against the UMLS Metathesaurus for medical concepts, returning ICD-10 and SNOMED codes. Falls through silently to the trie if the API key is missing or the service is down. |
+| **2b** | MARISA-Trie | < 1ms | Fallback prefix search against a compiled trie of ~500K+ medical terms from ICD-10, SNOMED-CT, and LOINC. Returns the best match + ICD-10/SNOMED code if available. |
 | **3** | Lab Pattern Engine | < 1ms | Regex-based detection of lab value patterns (e.g., `Glucose: 35`). Flags abnormal values against a clinically validated reference range table and returns a warning annotation. |
-| **4** | BioMistral-7B | 200–2000ms | AI-powered sentence completion via vLLM. Only invoked when all deterministic stages fail. Returns contextual completions grounded in medical knowledge. |
+| **4** | BioMistral-7B | 500–5000ms | AI-powered sentence completion via Ollama (CPU-friendly Q4 quant). Only invoked when all deterministic stages fail. Returns contextual completions grounded in medical knowledge. |
 
 **Why this order?**
 - Deterministic lookups first → fastest, most reliable, no hallucination risk
@@ -141,14 +145,15 @@ The orchestrator executes these stages **in strict sequential order**, returning
 | **Uvicorn** | ASGI server |
 | **MARISA-Trie** | Memory-efficient, blazing-fast prefix trie (C++ backed) |
 | **Pydantic v2** | Request/response validation |
-| **httpx** | Async HTTP client (for vLLM calls) |
+| **httpx** | Async HTTP client (for Ollama + UMLS API calls) |
 
 ### AI & Data
 | Technology | Purpose |
-|-----------|---------|
+|-----------|--------|
 | **BioMistral-7B** | Medical LLM (fine-tuned Mistral for biomedical text) |
-| **vLLM** | High-throughput LLM inference server (PagedAttention) |
-| **4-bit GPTQ** | Quantization for reduced GPU memory (~4GB VRAM) |
+| **Ollama** | Lightweight local LLM server — CPU-friendly inference |
+| **Q4 Quantization** | 4-bit quantization for reduced memory (~4.4 GB download) |
+| **UMLS REST API** | Live medical concept lookup with ICD-10 / SNOMED codes |
 
 ### Data Standards
 | Standard | Description | Source |
@@ -161,7 +166,7 @@ The orchestrator executes these stages **in strict sequential order**, returning
 | Technology | Purpose |
 |-----------|---------|
 | **Docker** | Containerization |
-| **Docker Compose** | Multi-service orchestration (frontend, backend, vLLM) |
+| **Docker Compose** | Multi-service orchestration (frontend, backend, Ollama) |
 | **Nginx** | Reverse proxy (production) |
 
 ---
@@ -179,16 +184,16 @@ clinical-copilot-engine/
 │   ├── app/
 │   │   ├── main.py                    # FastAPI app entry point
 │   │   ├── api/
-│   │   │   └── autocomplete.py        # POST /autocomplete route
+│   │   │   └── autocomplete.py        # POST /api/v1/suggest + SSE stream route
 │   │   ├── core/
 │   │   │   ├── config.py              # Settings via Pydantic BaseSettings
 │   │   │   └── middleware.py           # CORS, rate limiting, logging
 │   │   ├── schemas/
 │   │   │   └── models.py              # Request/Response Pydantic models
 │   │   └── services/
-│   │       ├── dictionary.py           # Abbreviation map + MARISA-Trie
+│   │       ├── dictionary.py           # Abbreviation map + MARISA-Trie + UMLS API
 │   │       ├── lab_engine.py           # Lab pattern detection + ranges
-│   │       ├── llm_client.py           # Async vLLM/BioMistral client
+│   │       ├── llm_client.py           # Async Ollama/BioMistral client
 │   │       └── orchestrator.py         # Waterfall logic controller
 │   ├── scripts/
 │   │   ├── Dockerfile                  # Backend container
@@ -209,7 +214,7 @@ clinical-copilot-engine/
 │   │   ├── hooks/
 │   │   │   └── useAutocomplete.ts     # Debounced autocomplete hook
 │   │   └── services/
-│   │       └── api.ts                  # Fetch wrapper for /autocomplete
+│   │       └── api.ts                  # Fetch wrapper for /api/v1/suggest
 │   ├── index.html
 │   ├── package.json
 │   ├── tailwind.config.js
@@ -266,13 +271,14 @@ Raw CSVs/TSVs  →  download_data.py  →  Normalized JSON  →  MARISA-Trie bin
 
 ## API Contract
 
-### `POST /autocomplete`
+### `POST /api/v1/suggest`
 
 **Request:**
 ```json
 {
   "text": "patient has diab",
-  "cursor_position": 16
+  "cursor_position": 16,
+  "specialty": "endocrinology"
 }
 ```
 
@@ -332,8 +338,22 @@ Returns service health and loaded resource status.
   "trie_term_count": 523847,
   "abbreviation_count": 1250,
   "lab_ranges_count": 85,
-  "llm_available": true
+  "ollama_available": true,
+  "umls_available": true
 }
+```
+
+### `GET /api/v1/suggest/stream`
+
+Streams Server-Sent Events with individual LLM tokens.
+
+**Query params:** `text` (required), `context_window` (optional, default 200)
+
+```
+data: {"token": "with"}
+data: {"token": " a"}
+data: {"token": " history"}
+data: [DONE]
 ```
 
 ---
@@ -345,8 +365,9 @@ Returns service health and loaded resource status.
 - **Python 3.11+**
 - **Node.js 20+** and **pnpm** (or npm)
 - **Docker** and **Docker Compose**
-- **NVIDIA GPU** (for vLLM / BioMistral) — optional for dev mode
-- **UMLS API Key** (for SNOMED-CT download)
+- **UMLS API Key** (for live Layer 2 lookup + SNOMED-CT download) — optional but recommended
+
+> **No GPU required.** Ollama runs BioMistral-7B Q4 on CPU.
 
 ### 1. Clone & Configure
 
@@ -390,14 +411,17 @@ pnpm dev
 
 ```bash
 docker compose up --build
+
+# One-time: pull the BioMistral model (~4.4 GB)
+./scripts/pull_model.sh
 ```
 
 Services:
 | Service | Port | Description |
 |---------|------|-------------|
-| `frontend` | 3000 | React + Vite dev server |
+| `ollama` | 11434 | Ollama LLM server (BioMistral-7B Q4) |
 | `backend` | 8000 | FastAPI server |
-| `vllm` | 8001 | vLLM inference server (BioMistral-7B) |
+| `frontend` | 3000 | React + Nginx static build |
 
 ---
 
@@ -410,22 +434,24 @@ For real-world production deployment, the recommended setup is:
 ```
 Internet → Nginx (TLS/SSL) → Frontend (Static build)
                             → /api/* → FastAPI (Uvicorn, 4 workers)
-                                         → vLLM Server (dedicated GPU node)
+                                         → Ollama Server (BioMistral-7B)
+                                         → UMLS REST API (external)
 ```
 
-**vLLM as a separate Docker container** is the recommended approach because:
-- **Isolation** — GPU workloads don't compete with CPU-bound trie lookups
+**Ollama as a separate Docker container** is the recommended approach because:
+- **Isolation** — LLM workloads don't compete with CPU-bound trie lookups
 - **Scaling** — scale API servers and LLM servers independently
 - **Reliability** — LLM container can restart without affecting fast-path lookups
-- **Flexibility** — swap models (BioMistral → Med-PaLM, etc.) without touching the API
+- **Flexibility** — swap models (BioMistral → Meditron, etc.) by changing one env var
+- **No GPU required** — Q4 quantization runs efficiently on CPU
 
 ### Docker Compose Services
 
 ```yaml
 services:
+  ollama:         # Ollama + BioMistral-7B Q4 (CPU)
   frontend:       # Nginx serving static React build
   backend:        # FastAPI + Uvicorn (CPU)
-  vllm:           # vLLM + BioMistral-7B (GPU)
 ```
 
 ---
@@ -436,11 +462,12 @@ All configuration via environment variables (`.env`):
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `UMLS_API_KEY` | UMLS REST API key for SNOMED-CT download | — |
+| `UMLS_API_KEY` | UMLS REST API key for live Layer 2 lookup + data download | — |
 | `LOINC_USERNAME` | LOINC download credentials | — |
 | `LOINC_PASSWORD` | LOINC download credentials | — |
-| `VLLM_BASE_URL` | vLLM server endpoint | `http://vllm:8001/v1` |
-| `VLLM_MODEL_NAME` | Model identifier | `BioMistral/BioMistral-7B-GPTQ` |
+| `OLLAMA_URL` | Ollama server endpoint | `http://ollama:11434` |
+| `OLLAMA_MODEL` | Model identifier | `cniongolo/biomistral` |
+| `OLLAMA_TIMEOUT_SECONDS` | Request timeout for Ollama | `30.0` |
 | `CORS_ORIGINS` | Allowed frontend origins | `http://localhost:3000` |
 | `LOG_LEVEL` | Logging level | `INFO` |
 | `RATE_LIMIT_PER_MINUTE` | API rate limit per client | `300` |
@@ -459,7 +486,7 @@ This system is designed for use in clinical environments. Key considerations:
 - **CORS** — strict origin whitelisting
 - **Input sanitization** — all inputs validated via Pydantic models
 - **Audit logging** — structured logs for all autocomplete requests (configurable)
-- **HIPAA alignment** — no external API calls in the default pipeline; vLLM runs on-premise
+- **HIPAA alignment** — UMLS API calls transmit only search terms (no PHI); Ollama runs on-premise
 
 > **Note:** This tool provides *suggestions only*. All clinical decisions remain with the treating physician. The system does not store, transmit, or process Protected Health Information (PHI) beyond the immediate autocomplete request.
 
@@ -468,18 +495,21 @@ This system is designed for use in clinical environments. Key considerations:
 ## Roadmap
 
 - [x] Project structure & architecture design
-- [ ] Backend: FastAPI app scaffold + health endpoint
-- [ ] Backend: Abbreviation map service (~1,250 clinical abbreviations)
-- [ ] Backend: MARISA-Trie dictionary service (ICD-10 + SNOMED + LOINC)
-- [ ] Backend: Lab pattern engine (85+ lab tests with clinical ranges)
-- [ ] Backend: vLLM / BioMistral client with async streaming
-- [ ] Backend: Orchestrator (waterfall logic)
-- [ ] Backend: Data download & compilation script (CMS + UMLS + LOINC)
-- [ ] Backend: Rate limiting, CORS, structured logging middleware
-- [ ] Backend: Test suite (unit + integration)
-- [ ] Frontend: Lexical editor with ghost text plugin
-- [ ] Frontend: Debounced autocomplete hook
-- [ ] Frontend: Polished clinical UI
-- [ ] Docker Compose: Full stack (frontend + backend + vLLM)
-- [ ] Production: Nginx config, TLS, multi-worker Uvicorn
+- [x] Backend: FastAPI app scaffold + health endpoint
+- [x] Backend: Abbreviation map service (~1,250 clinical abbreviations)
+- [x] Backend: MARISA-Trie dictionary service (ICD-10 + SNOMED + LOINC)
+- [x] Backend: Lab pattern engine (85+ lab tests with clinical ranges)
+- [x] Backend: Ollama / BioMistral client with async streaming
+- [x] Backend: UMLS REST API service (live Layer 2 lookup)
+- [x] Backend: Orchestrator (waterfall logic with UMLS → Trie fallback)
+- [x] Backend: Data download & compilation script (CMS + UMLS + LOINC)
+- [x] Backend: Rate limiting, CORS, structured logging middleware
+- [x] Backend: Test suite (unit + integration)
+- [x] Frontend: Lexical editor with ghost text plugin
+- [x] Frontend: Debounced autocomplete hook (300ms)
+- [x] Frontend: Polished clinical UI
+- [x] Docker Compose: Full stack (frontend + backend + Ollama)
+- [x] Production: Nginx config, multi-worker Uvicorn
+- [x] SSE streaming endpoint (`/api/v1/suggest/stream`)
+- [ ] Production: TLS termination
 - [ ] Documentation: API docs (auto-generated via FastAPI /docs)

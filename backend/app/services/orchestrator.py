@@ -24,7 +24,7 @@ from app.schemas.models import (
     LabFlag,
     SuggestionSource,
 )
-from app.services.dictionary import DictionaryService
+from app.services.dictionary import DictionaryService, UMLSApiService
 from app.services.lab_engine import LabEngine, Severity
 from app.services.llm_client import LLMClient
 
@@ -44,10 +44,12 @@ class Orchestrator:
         dictionary: DictionaryService,
         lab_engine: LabEngine,
         llm_client: LLMClient,
+        umls_service: Optional[UMLSApiService] = None,
     ) -> None:
         self._dictionary = dictionary
         self._lab_engine = lab_engine
         self._llm_client = llm_client
+        self._umls = umls_service
 
     async def suggest(
         self, request: AutocompleteRequest
@@ -78,8 +80,12 @@ class Orchestrator:
                 self._log_latency("abbreviation", start)
                 return result
 
-        # ── Stage 2: MARISA-Trie Prefix Search ─────────────────────
+        # ── Stage 2: UMLS API (primary) → MARISA-Trie (fallback) ──
         if last_token and len(last_token) >= 2:
+            result = await self._stage_umls(last_token)
+            if result:
+                self._log_latency("umls_api", start)
+                return result
             result = self._stage_trie(last_token, text_to_cursor)
             if result:
                 self._log_latency("trie", start)
@@ -118,6 +124,38 @@ class Orchestrator:
             snomed_code=snomed_code,
             confidence=1.0,
         )
+
+    async def _stage_umls(self, token: str) -> Optional[AutocompleteResponse]:
+        """Stage 2a: UMLS REST API live lookup (primary)."""
+        if not self._umls or not self._umls.is_available:
+            return None
+
+        try:
+            results = await self._umls.search(token, max_results=5)
+            if not results:
+                return None
+
+            # Pick the best match (shortest term)
+            results.sort(key=lambda r: len(r[0]))
+            best_term, icd_code, snomed_code, loinc_code = results[0]
+
+            token_lower = token.lower()
+            if best_term.lower().startswith(token_lower):
+                suggestion = best_term[len(token_lower):]
+            else:
+                suggestion = best_term
+
+            return AutocompleteResponse(
+                suggestion=suggestion,
+                source=SuggestionSource.TRIE,
+                icd_code=icd_code,
+                snomed_code=snomed_code,
+                loinc_code=loinc_code,
+                confidence=0.95,
+            )
+        except Exception as e:
+            logger.debug("UMLS stage error: %s", e)
+            return None
 
     def _stage_trie(
         self, token: str, full_text: str

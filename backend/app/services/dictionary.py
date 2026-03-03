@@ -14,6 +14,7 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+import httpx
 import marisa_trie
 
 from app.core.config import get_settings
@@ -508,3 +509,154 @@ class DictionaryService:
         except Exception as e:
             logger.warning("Failed to load %s lookup: %s", label, e)
             return {}
+
+
+# ── UMLS REST API Service ──────────────────────────────────────────
+# Primary Layer 2 source — live lookup for medical concepts.
+# Falls back silently to MARISA-Trie if the key is missing or API is down.
+
+
+class UMLSApiService:
+    """
+    Async client for the UMLS REST API.
+
+    Used as the primary Layer 2 source for medical term lookup.
+    Returns ICD-10 / SNOMED codes for a given search term.
+    Falls through to the trie silently on any error.
+    """
+
+    BASE_URL = "https://uts-ws.nlm.nih.gov/rest"
+
+    def __init__(self) -> None:
+        self._client: Optional[httpx.AsyncClient] = None
+        self._api_key: Optional[str] = None
+        self._available = False
+
+    @property
+    def is_available(self) -> bool:
+        return self._available
+
+    async def initialize(self) -> None:
+        """Create the async HTTP client if UMLS_API_KEY is configured."""
+        settings = get_settings()
+        self._api_key = settings.umls_api_key
+        if not self._api_key:
+            logger.info("UMLS_API_KEY not set — UMLS live lookup disabled.")
+            self._available = False
+            return
+
+        self._client = httpx.AsyncClient(
+            base_url=self.BASE_URL,
+            timeout=httpx.Timeout(10.0),
+        )
+        self._available = True
+        logger.info("UMLS API service initialized.")
+
+    async def shutdown(self) -> None:
+        """Cleanly close the HTTP client."""
+        if self._client:
+            await self._client.aclose()
+            self._client = None
+            self._available = False
+
+    async def search(
+        self, term: str, max_results: int = 5
+    ) -> Optional[List[Tuple[str, Optional[str], Optional[str], Optional[str]]]]:
+        """
+        Search UMLS for a medical concept by prefix/term.
+
+        Args:
+            term: The search term (prefix or partial medical word).
+            max_results: Maximum number of results to return.
+
+        Returns:
+            List of (concept_name, icd_code, snomed_code, None) or None on failure.
+            Never raises — returns None on any error so the trie can take over.
+        """
+        if not self._client or not self._available or not self._api_key:
+            return None
+
+        try:
+            # Step 1: Search for concepts
+            params = {
+                "apiKey": self._api_key,
+                "string": term,
+                "searchType": "leftTruncation",
+                "returnIdType": "concept",
+                "pageSize": max_results,
+            }
+            response = await self._client.get("/search/current", params=params)
+            response.raise_for_status()
+            data = response.json()
+
+            results_list = data.get("result", {}).get("results", [])
+            if not results_list:
+                return None
+
+            output = []
+            for item in results_list[:max_results]:
+                concept_name = item.get("name", "")
+                cui = item.get("ui", "")
+                if not concept_name or not cui:
+                    continue
+
+                # Step 2: Get ICD-10 and SNOMED codes for each CUI
+                icd_code, snomed_code = await self._get_codes(cui)
+                output.append((concept_name.lower(), icd_code, snomed_code, None))
+
+            return output if output else None
+
+        except httpx.TimeoutException:
+            logger.debug("UMLS API timed out for term '%s'.", term)
+            return None
+        except httpx.HTTPStatusError as e:
+            logger.debug("UMLS API HTTP error: %s", e.response.status_code)
+            return None
+        except Exception as e:
+            logger.debug("UMLS API error: %s", e)
+            return None
+
+    async def _get_codes(
+        self, cui: str
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Retrieve ICD-10-CM and SNOMED-CT codes for a given CUI.
+
+        Returns:
+            (icd_code, snomed_code) — either may be None.
+        """
+        icd_code: Optional[str] = None
+        snomed_code: Optional[str] = None
+
+        if not self._client or not self._api_key:
+            return icd_code, snomed_code
+
+        try:
+            params = {"apiKey": self._api_key}
+            response = await self._client.get(
+                f"/content/current/CUI/{cui}/atoms",
+                params=params,
+            )
+            if response.status_code != 200:
+                return icd_code, snomed_code
+
+            atoms = response.json().get("result", [])
+            for atom in atoms:
+                source = atom.get("rootSource", "")
+                code = atom.get("code", "")
+                # Extract just the code ID from the UMLS URI
+                if "/" in code:
+                    code = code.rsplit("/", 1)[-1]
+
+                if source == "ICD10CM" and not icd_code:
+                    icd_code = code
+                elif source == "SNOMEDCT_US" and not snomed_code:
+                    snomed_code = code
+
+                if icd_code and snomed_code:
+                    break
+
+        except Exception as e:
+            logger.debug("UMLS code lookup error for CUI %s: %s", cui, e)
+
+        return icd_code, snomed_code

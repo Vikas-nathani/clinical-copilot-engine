@@ -36,8 +36,8 @@ class LabFlag(str, Enum):
 # ── Request Models ──────────────────────────────────────────────────
 
 
-class AutocompleteRequest(BaseModel):
-    """Incoming autocomplete request from the frontend editor."""
+class SuggestRequest(BaseModel):
+    """Incoming suggest request from the frontend editor."""
 
     text: str = Field(
         ...,
@@ -58,6 +58,11 @@ class AutocompleteRequest(BaseModel):
         le=1000,
         description="Number of preceding characters to use for context (LLM stage).",
     )
+    specialty: Optional[str] = Field(
+        default="general",
+        description="Clinical specialty context (e.g. cardiology, endocrinology).",
+        examples=["endocrinology"],
+    )
 
     @field_validator("cursor_position")
     @classmethod
@@ -68,6 +73,10 @@ class AutocompleteRequest(BaseModel):
                 f"cursor_position ({v}) exceeds text length ({len(text)})"
             )
         return v
+
+
+# Backward-compatible alias
+AutocompleteRequest = SuggestRequest
 
 
 # ── Response Models ─────────────────────────────────────────────────
@@ -111,6 +120,10 @@ class AutocompleteResponse(BaseModel):
         default=None,
         description="Lab severity flag (only set by lab_engine stage).",
     )
+    specialty: Optional[str] = Field(
+        default=None,
+        description="Specialty context that influenced this suggestion.",
+    )
 
 
 class EmptyResponse(BaseModel):
@@ -131,7 +144,8 @@ class HealthResponse(BaseModel):
     trie_term_count: int
     abbreviation_count: int
     lab_ranges_count: int
-    llm_available: bool
+    ollama_available: bool
+    umls_available: bool
     version: str
 
 

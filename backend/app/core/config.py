@@ -65,13 +65,15 @@ class Settings(BaseSettings):
     # ── Rate Limiting ───────────────────────────────────────────────
     rate_limit_per_minute: int = 300
 
-    # ── vLLM / BioMistral ──────────────────────────────────────────
-    vllm_base_url: str = "http://localhost:8001/v1"
-    vllm_model_name: str = "BioMistral/BioMistral-7B-GPTQ"
-    vllm_timeout_seconds: float = 10.0
-    vllm_max_tokens: int = 60
-    vllm_temperature: float = 0.3
-    vllm_top_p: float = 0.9
+    # ── Ollama / BioMistral ─────────────────────────────────────────
+    ollama_url: str = "http://ollama:11434"
+    ollama_model: str = "cniongolo/biomistral"
+    ollama_timeout_seconds: float = 30.0
+    ollama_stream_timeout_seconds: float = 60.0
+    ollama_max_tokens: int = 60
+    ollama_temperature: float = 0.3
+    ollama_top_p: float = 0.9
+    ollama_repeat_penalty: float = 1.1
 
     # ── Autocomplete Tuning ─────────────────────────────────────────
     max_suggestion_length: int = 80
