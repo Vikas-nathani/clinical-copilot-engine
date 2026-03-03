@@ -73,6 +73,25 @@ function AutocompletePlugin({
         editor.update(() => {
           const selection = $getSelection();
           if ($isRangeSelection(selection)) {
+            // For abbreviation/umls sources the backend returns the full
+            // term (e.g. "hypertension" for "htn").  We need to select the
+            // trigger word backwards so insertText *replaces* it instead
+            // of appending.
+            const src = suggestion?.source;
+            if (src === "abbreviation" || src === "umls") {
+              const anchor = selection.anchor;
+              const textContent = anchor.getNode().getTextContent();
+              const textBefore = textContent.slice(0, anchor.offset);
+              const match = textBefore.match(/\S+$/);
+              const triggerLen = match ? match[0].length : 0;
+
+              if (triggerLen > 0) {
+                // Extend selection backward to cover the trigger word
+                const newOffset = anchor.offset - triggerLen;
+                selection.anchor.set(anchor.key, newOffset, anchor.type);
+                // focus stays at the original cursor position
+              }
+            }
             selection.insertText(accepted);
           }
         });
