@@ -151,7 +151,7 @@ async def suggest_stream(
     description="Returns service health status and loaded resource counts.",
 )
 async def health(
-    response: Response,
+    response: Response = None,
     dictionary: DictionaryService = Depends(get_dictionary),
     lab_engine: LabEngine = Depends(get_lab_engine),
     llm_client: LLMClient = Depends(get_llm_client),
@@ -164,7 +164,7 @@ async def health(
     is_healthy = dictionary.is_loaded
     status = "healthy" if is_healthy else "degraded"
 
-    if not is_healthy:
+    if not is_healthy and response:
         response.status_code = 503
 
     return HealthResponse(
