@@ -54,4 +54,4 @@ data/raw/*.gz
 .pytest_cache/
 .coverage
 htmlcov/
-.mypy_cache/
+.mypy_cache/ 
