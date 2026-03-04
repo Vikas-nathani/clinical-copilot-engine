@@ -72,7 +72,7 @@ export function useAutocomplete(
         setLoading(true);
 
         const result = await fetchAutocomplete(
-          { text, cursor_position: cursorPosition },
+          { text, cursor_position: cursorPosition+1 },
           controller.signal
         );
 
