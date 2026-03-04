@@ -10,11 +10,11 @@ import json
 import logging
 from typing import Union
 
-from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.core.config import get_settings
-from app.core.middleware import limiter
+# from app.core.middleware import limiter
 from app.schemas.models import (
     SuggestRequest,
     AutocompleteResponse,
@@ -74,7 +74,7 @@ def get_umls_service(request: Request) -> UMLSApiService:
         "a real-time autocomplete suggestion via the 4-stage waterfall pipeline."
     ),
 )
-@limiter.limit("300/minute")
+# @limiter.limit("300/minute")
 async def suggest(
     request: Request,
     payload: SuggestRequest,
@@ -107,7 +107,7 @@ async def suggest(
         "Useful for real-time typewriter-style completions."
     ),
 )
-@limiter.limit("60/minute")
+# @limiter.limit("60/minute")
 async def suggest_stream(
     request: Request,
     text: str = Query(..., min_length=1, max_length=5000, description="Clinical note text"),
