@@ -47,8 +47,8 @@ class SuggestRequest(BaseModel):
         description="The full text content from the clinical note editor.",
         examples=["patient has diab"],
     )
-    cursor_position: None = Field(
-        ...,
+    cursor_position: Optional[int] = Field(
+        default=None,
         ge=0,
         description="0-indexed cursor position within the text.",
         examples=[16],
@@ -65,15 +65,15 @@ class SuggestRequest(BaseModel):
         examples=["endocrinology"],
     )
 
-    @field_validator("cursor_position")
-    @classmethod
-    def cursor_within_text(cls, v: int, info) -> int:
-        text = info.data.get("text", "")
-        if v > len(text):
-            raise ValueError(
-                f"cursor_position ({v}) exceeds text length ({len(text)})"
-            )
-        return v
+    # @field_validator("cursor_position")
+    # @classmethod
+    # def cursor_within_text(cls, v: int, info) -> int:
+    #     text = info.data.get("text", "")
+    #     if v > len(text):
+    #         raise ValueError(
+    #             f"cursor_position ({v}) exceeds text length ({len(text)})"
+    #         )
+    #     return v
 
 
 # Backward-compatible alias
