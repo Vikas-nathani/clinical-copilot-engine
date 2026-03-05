@@ -70,11 +70,15 @@ export function useAutocomplete(
         const controller = new AbortController();
         abortRef.current = controller;
         setLoading(true);
+        
 
+
+        console.log('cursor:', cursorPosition, 'textLen:', text.length);
         const result = await fetchAutocomplete(
           { text, cursor_position: cursorPosition },
           controller.signal
         );
+
 
         // Only update if this request wasn't aborted
         if (!controller.signal.aborted) {

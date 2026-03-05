@@ -9,6 +9,7 @@ Both stages return ICD-10 / SNOMED codes when available.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -522,11 +523,14 @@ class UMLSApiService:
     """
 
     BASE_URL = "https://uts-ws.nlm.nih.gov/rest"
+    _MAX_TERM_LENGTH = 120
+    _CIRCUIT_BREAKER_THRESHOLD = 5
 
     def __init__(self) -> None:
         self._client: Optional[httpx.AsyncClient] = None
         self._api_key: Optional[str] = None
         self._available = False
+        self._consecutive_failures = 0
 
     @property
     def is_available(self) -> bool:
@@ -546,6 +550,7 @@ class UMLSApiService:
             timeout=httpx.Timeout(10.0),
         )
         self._available = True
+        self._consecutive_failures = 0
         logger.info("UMLS API service initialized.")
 
     async def shutdown(self) -> None:
@@ -553,6 +558,20 @@ class UMLSApiService:
         if self._client:
             await self._client.aclose()
             self._client = None
+            self._available = False
+
+    def _record_success(self) -> None:
+        """Reset the circuit breaker on a successful call."""
+        self._consecutive_failures = 0
+
+    def _record_failure(self) -> None:
+        """Increment failure count; disable service if threshold is reached."""
+        self._consecutive_failures += 1
+        if self._consecutive_failures >= self._CIRCUIT_BREAKER_THRESHOLD:
+            logger.error(
+                "UMLS API hit %d consecutive failures — disabling live lookup.",
+                self._consecutive_failures,
+            )
             self._available = False
 
     async def search(
@@ -572,6 +591,11 @@ class UMLSApiService:
         if not self._client or not self._available or not self._api_key:
             return None
 
+        # Input validation — cap length to avoid sending huge strings
+        term = term.strip()[:self._MAX_TERM_LENGTH]
+        if not term:
+            return None
+
         try:
             # Step 1: Search for concepts
             params = {
@@ -587,29 +611,52 @@ class UMLSApiService:
 
             results_list = data.get("result", {}).get("results", [])
             if not results_list:
+                self._record_success()
                 return None
 
-            output = []
-            for item in results_list[:max_results]:
-                concept_name = item.get("name", "")
-                cui = item.get("ui", "")
-                if not concept_name or not cui:
-                    continue
+            # Step 2: Get ICD-10 and SNOMED codes in parallel
+            items = [
+                (item.get("name", ""), item.get("ui", ""))
+                for item in results_list[:max_results]
+                if item.get("name") and item.get("ui")
+            ]
+            if not items:
+                self._record_success()
+                return None
 
-                # Step 2: Get ICD-10 and SNOMED codes for each CUI
-                icd_code, snomed_code = await self._get_codes(cui)
+            code_tasks = [self._get_codes(cui) for _, cui in items]
+            code_results = await asyncio.gather(*code_tasks, return_exceptions=True)
+
+            output = []
+            for (concept_name, _cui), codes in zip(items, code_results):
+                if isinstance(codes, Exception):
+                    logger.warning("UMLS code lookup failed for CUI %s: %s", _cui, codes)
+                    icd_code, snomed_code = None, None
+                else:
+                    icd_code, snomed_code = codes
                 output.append((concept_name.lower(), icd_code, snomed_code, None))
 
+            self._record_success()
             return output if output else None
 
         except httpx.TimeoutException:
-            logger.debug("UMLS API timed out for term '%s'.", term)
+            logger.warning("UMLS API timed out for term '%s'.", term)
+            self._record_failure()
             return None
         except httpx.HTTPStatusError as e:
-            logger.debug("UMLS API HTTP error: %s", e.response.status_code)
+            status = e.response.status_code
+            if status == 401:
+                logger.error("UMLS API key is invalid (401). Disabling service.")
+                self._available = False
+            elif status == 429:
+                logger.warning("UMLS API rate-limited (429) for term '%s'.", term)
+            else:
+                logger.warning("UMLS API HTTP %d for term '%s'.", status, term)
+            self._record_failure()
             return None
         except Exception as e:
-            logger.debug("UMLS API error: %s", e)
+            logger.warning("UMLS stage error full details: %s", repr(e))
+            self._record_failure()
             return None
 
     async def _get_codes(
@@ -634,6 +681,10 @@ class UMLSApiService:
                 params=params,
             )
             if response.status_code != 200:
+                logger.warning(
+                    "UMLS atoms lookup returned HTTP %d for CUI %s.",
+                    response.status_code, cui,
+                )
                 return icd_code, snomed_code
 
             atoms = response.json().get("result", [])
@@ -653,6 +704,6 @@ class UMLSApiService:
                     break
 
         except Exception as e:
-            logger.debug("UMLS code lookup error for CUI %s: %s", cui, e)
+            logger.warning("UMLS code lookup error for CUI %s: %s", cui, repr(e))
 
         return icd_code, snomed_code
