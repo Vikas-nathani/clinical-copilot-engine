@@ -1,28 +1,89 @@
-# # ── Clinical Copilot Engine — Docker Compose ────────────────────────
-# # Full stack: Frontend + Backend + Ollama (BioMistral-7B Q4 CPU)
-# #
-# # Usage:
-# #   docker compose up --build           # Start all services
-# #   docker compose up backend           # Backend only (dev)
-# #
-# # After first `docker compose up`, run:
-# #   ./scripts/pull_model.sh             # One-time ~4.4 GB download
+# # # ── Clinical Copilot Engine — Docker Compose ────────────────────────
+# # # Full stack: Frontend + Backend + Ollama (BioMistral-7B Q4 CPU)
+# # #
+# # # Usage:
+# # #   docker compose up --build           # Start all services
+# # #   docker compose up backend           # Backend only (dev)
+# # #
+# # # After first `docker compose up`, run:
+# # #   ./scripts/pull_model.sh             # One-time ~4.4 GB download
+
+# # services:
+
+# #   # ── Ollama (BioMistral-7B Q4 CPU) ─────────────────────────────────
+# #   ollama:
+# #   image: ollama/ollama:latest
+# #   container_name: copilot-ollama
+# #   ports:
+# #     - "11434:11434"
+# #   volumes:
+# #     - ollama_data:/root/.ollama
+# #   restart: unless-stopped
+# #   networks:
+# #     - copilot-net
+
+# #   # ── Backend (FastAPI) ─────────────────────────────────────────────
+# #   backend:
+# #     build:
+# #       context: ./backend
+# #       dockerfile: scripts/Dockerfile
+# #     container_name: copilot-backend
+# #     ports:
+# #       - "8000:8000"
+# #     env_file:
+# #       - .env
+# #     environment:
+# #       - DATA_DIR=/app/data
+# #       - OLLAMA_URL=http://ollama:11434
+# #     volumes:
+# #       - ./data:/app/data:ro
+# #     depends_on:
+# #     - ollama
+# #     restart: unless-stopped
+# #     healthcheck:
+# #       test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()"]
+# #       interval: 30s
+# #       timeout: 5s
+# #       retries: 3
+# #       start_period: 10s
+# #     networks:
+# #       - copilot-net
+
+# #   # ── Frontend (React + Vite) ──────────────────────────────────────
+# #   frontend:
+# #     build:
+# #       context: ./frontend
+# #       dockerfile: Dockerfile
+# #     container_name: copilot-frontend
+# #     ports:
+# #       - "3000:3000"
+# #     depends_on:
+# #       backend:
+# #         condition: service_healthy
+# #     restart: unless-stopped
+# #     networks:
+# #       - copilot-net
+
+# # volumes:
+# #   ollama_data:
+
+# # networks:
+# #   copilot-net:
+# #     driver: bridge
 
 # services:
 
-#   # ── Ollama (BioMistral-7B Q4 CPU) ─────────────────────────────────
 #   ollama:
-#   image: ollama/ollama:latest
-#   container_name: copilot-ollama
-#   ports:
-#     - "11434:11434"
-#   volumes:
-#     - ollama_data:/root/.ollama
-#   restart: unless-stopped
-#   networks:
-#     - copilot-net
+#     image: ollama/ollama:latest
+#     container_name: copilot-ollama
+#     ports:
+#       - "11434:11434"
+#     volumes:
+#       - ollama_data:/root/.ollama
+#     restart: unless-stopped
+#     networks:
+#       - copilot-net
 
-#   # ── Backend (FastAPI) ─────────────────────────────────────────────
 #   backend:
 #     build:
 #       context: ./backend
@@ -38,28 +99,19 @@
 #     volumes:
 #       - ./data:/app/data:ro
 #     depends_on:
-#     - ollama
+#       - ollama
 #     restart: unless-stopped
-#     healthcheck:
-#       test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()"]
-#       interval: 30s
-#       timeout: 5s
-#       retries: 3
-#       start_period: 10s
 #     networks:
 #       - copilot-net
 
-#   # ── Frontend (React + Vite) ──────────────────────────────────────
 #   frontend:
 #     build:
 #       context: ./frontend
-#       dockerfile: Dockerfile
 #     container_name: copilot-frontend
 #     ports:
 #       - "3000:3000"
 #     depends_on:
-#       backend:
-#         condition: service_healthy
+#       - backend
 #     restart: unless-stopped
 #     networks:
 #       - copilot-net
@@ -70,7 +122,6 @@
 # networks:
 #   copilot-net:
 #     driver: bridge
-
 services:
 
   ollama:
@@ -81,6 +132,12 @@ services:
     volumes:
       - ollama_data:/root/.ollama
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     networks:
       - copilot-net
 
@@ -99,7 +156,8 @@ services:
     volumes:
       - ./data:/app/data:ro
     depends_on:
-      - ollama
+      ollama:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - copilot-net
@@ -122,7 +180,6 @@ volumes:
 networks:
   copilot-net:
     driver: bridge
-
 
 
 
