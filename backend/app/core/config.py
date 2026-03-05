@@ -68,7 +68,7 @@ class Settings(BaseSettings):
     # ── Ollama / BioMistral ─────────────────────────────────────────
     ollama_url: str = "http://ollama:11434"
     ollama_model: str = "cniongolo/biomistral"
-    ollama_timeout_seconds: float = 30.0
+    ollama_timeout_seconds: float = 120.0
     ollama_stream_timeout_seconds: float = 60.0
     ollama_max_tokens: int = 60
     ollama_temperature: float = 0.3

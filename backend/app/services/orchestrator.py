@@ -182,8 +182,7 @@ class Orchestrator:
             return None
 
     def _stage_trie(
-        self, token: str, full_text: str
-    ) -> Optional[AutocompleteResponse]:
+        self, token: str, full_text: str) -> Optional[AutocompleteResponse]:
         """Stage 2: MARISA-Trie prefix search."""
         results = self._dictionary.search_prefix(token, max_results=5)
         if not results:

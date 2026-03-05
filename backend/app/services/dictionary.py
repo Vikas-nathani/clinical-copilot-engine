@@ -481,12 +481,24 @@ class DictionaryService:
         # Sort by length (prefer shorter, more precise completions)
         matches.sort(key=len)
         results = []
-        for term in matches[:max_results]:
-            icd = self._icd10_lookup.get(term)
-            snomed = self._snomed_lookup.get(term)
-            loinc = self._loinc_lookup.get(term)
-            results.append((term, icd, snomed, loinc))
+        # for term in matches[:max_results]:
+        #     icd = self._icd10_lookup.get(term)
+        #     snomed = self._snomed_lookup.get(term)
+        #     loinc = self._loinc_lookup.get(term)
+        #     results.append((term, icd, snomed, loinc))
 
+        # return results
+        for term in matches[:max_results]:
+            icd_entry = self._icd10_lookup.get(term)
+            snomed_entry = self._snomed_lookup.get(term)
+            loinc_entry = self._loinc_lookup.get(term)
+            
+            icd = icd_entry.get("code") if isinstance(icd_entry, dict) else icd_entry
+            snomed = snomed_entry.get("snomed_code") if isinstance(snomed_entry, dict) else snomed_entry
+            loinc = loinc_entry.get("loinc_code") if isinstance(loinc_entry, dict) else loinc_entry
+    
+            results.append((term, icd, snomed, loinc))
+        
         return results
 
     # ── Helpers ─────────────────────────────────────────────────────
