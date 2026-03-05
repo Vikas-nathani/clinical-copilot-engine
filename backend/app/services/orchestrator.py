@@ -3,8 +3,8 @@ Orchestrator — Waterfall Autocomplete Controller.
 
 Executes the 4-stage waterfall in strict sequential order:
   1. Abbreviation map lookup
-  2. MARISA-Trie prefix search
-  3. Lab pattern engine
+  2. Lab pattern engine
+  3. MARISA-Trie prefix search (Local Dictionary)
   4. BioMistral-7B (vLLM) fallback
 
 Returns the first successful match, assembling it into an
@@ -31,16 +31,9 @@ from app.services.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
 
-# Pre-compiled regex for token splitting (avoids recompilation per request)
-_TOKEN_SPLIT_RE = re.compile(r"[\s,;]+")
-
-
 class Orchestrator:
     """
     Central controller that runs the waterfall pipeline.
-
-    Each stage is attempted in order. The first stage that produces
-    a result short-circuits the rest — minimizing latency.
     """
 
     def __init__(
@@ -60,54 +53,67 @@ class Orchestrator:
     ) -> Union[AutocompleteResponse, EmptyResponse]:
         """
         Run the waterfall pipeline and return the best suggestion.
-
-        Args:
-            request: Validated autocomplete request with text + cursor_position.
-
-        Returns:
-            AutocompleteResponse on match, EmptyResponse otherwise.
         """
         start = time.perf_counter()
 
-        # Extract the relevant text up to the cursor
+        # 1. Validation
+        if request.cursor_position is None or request.cursor_position < 0:
+            # Fallback if cursor not provided: use end of text
+            request.cursor_position = len(request.text)
+
         text_to_cursor = request.text[: request.cursor_position]
         if not text_to_cursor.strip():
             return EmptyResponse()
 
-        # Extract the last token (word) for abbreviation / trie lookup
+        # 2. Extract context
         last_token = self._extract_last_token(text_to_cursor)
+        last_phrase = self._extract_last_phrase(text_to_cursor, max_words=3)
 
-        # ── Stage 1: Abbreviation Map ──────────────────────────────
-        if last_token:
+        # ── Stage 1: Abbreviation (single token only) ──────────────
+        if last_token and " " not in last_token:
             result = self._stage_abbreviation(last_token)
             if result:
                 self._log_latency("abbreviation", start)
                 return result
 
-        # ── Stage 2: UMLS API (primary) → MARISA-Trie (fallback) ──
-        if last_token and len(last_token) >= 2:
-            result = await self._stage_umls(last_token)
-            if result:
-                self._log_latency("umls_api", start)
-                return result
-            result = self._stage_trie(last_token, text_to_cursor)
-            if result:
-                self._log_latency("trie", start)
-                return result
-
-        # ── Stage 3: Lab Pattern Engine ────────────────────────────
+        # ── Stage 2: Lab Pattern Engine ────────────────────────────
+        # Checks for patterns like "Glucose: 35"
         result = self._stage_lab(text_to_cursor)
         if result:
             self._log_latency("lab_engine", start)
             return result
 
-        # ── Stage 4: LLM Fallback ─────────────────────────────────
+        # ── Stage 3: Dictionary (UMLS/Trie) ────────────────────────
+        # Try phrase first (e.g. "type 2 dia"), then token (e.g. "obesi")
+        search_term = last_phrase if len(last_phrase) > len(last_token) else last_token
+        
+        if search_term and len(search_term) >= 2:
+            # A. Try UMLS API (if configured)
+            result = await self._stage_umls(search_term)
+            if result:
+                self._log_latency("umls_api", start)
+                return result
+            
+            # B. Try Local Trie (Primary Lookup)
+            result = self._stage_trie(search_term, text_to_cursor)
+            if result:
+                self._log_latency("trie", start)
+                return result
+            
+            # C. Fallback: Check just the last token in Trie if phrase failed
+            if search_term != last_token and last_token and len(last_token) >= 2:
+                result = self._stage_trie(last_token, text_to_cursor)
+                if result:
+                    self._log_latency("trie_token", start)
+                    return result
+
+        # ── Stage 4: LLM Fallback (BioMistral) ─────────────────────
+        # Only triggers if no dictionary/lab/abbreviation match found
         result = await self._stage_llm(text_to_cursor, request.context_window or 200)
         if result:
             self._log_latency("llm", start)
             return result
 
-        # ── No match ──────────────────────────────────────────────
         elapsed = (time.perf_counter() - start) * 1000
         logger.debug("No suggestion found. Total time: %.1fms", elapsed)
         return EmptyResponse()
@@ -120,6 +126,7 @@ class Orchestrator:
         if not match:
             return None
 
+        # Expecting tuple: (term, icd_code, snomed_code)
         term, icd_code, snomed_code = match
         return AutocompleteResponse(
             suggestion=term,
@@ -129,96 +136,12 @@ class Orchestrator:
             confidence=1.0,
         )
 
-    async def _stage_umls(self, token: str) -> Optional[AutocompleteResponse]:
-        """Stage 2a: UMLS REST API live lookup (primary)."""
-        if not self._umls or not self._umls.is_available:
-            return None
-        if len(token) < 5:
-            return None
-
-        try:
-            results = await self._umls.search(token, max_results=5)
-            logger.warning("UMLS raw results for '%s': %s", token, results)
-            if not results:
-                return None
-
-            # Pick best match — prefer common medical terms starting with prefix
-            token_lower = token.lower()
-            starts_with = [
-                r for r in results 
-                if r[0].lower().startswith(token_lower)
-                and len(r[0].split()) <= 4
-                and not any(c in r[0] for c in [':', '{', '.', '/'])
-                and len(r[0]) >= len(token) + 2  # must add at least 2 chars
-                and r[0].lower() != token_lower  # skip exact matches
-                and ' ' in r[0]  # must be at least two words (real medical terms)
-            ]
-            if starts_with:
-                starts_with.sort(key=lambda r: len(r[0]))
-                best_term, icd_code, snomed_code, loinc_code = starts_with[0]
-            else:
-                return None
-
-            token_lower = token.lower()
-            if best_term.lower().startswith(token_lower):
-                suggestion = best_term[len(token_lower):]
-            else:
-                suggestion = best_term
-
-            # Guard: skip empty suggestions (exact match, nothing to complete)
-            if not suggestion:
-                return None
-
-            return AutocompleteResponse(
-                suggestion=suggestion,
-                source=SuggestionSource.UMLS,
-                icd_code=icd_code,
-                snomed_code=snomed_code,
-                loinc_code=loinc_code,
-                confidence=0.95,
-            )
-        except Exception as e:
-            logger.warning("UMLS stage error: %s", e)
-            return None
-
-    def _stage_trie(
-        self, token: str, full_text: str) -> Optional[AutocompleteResponse]:
-        """Stage 2: MARISA-Trie prefix search."""
-        results = self._dictionary.search_prefix(token, max_results=5)
-        if not results:
-            return None
-
-        # Pick the best match (shortest term = most precise completion)
-        best_term, icd_code, snomed_code, loinc_code = results[0]
-
-        # The suggestion is the remaining portion after what the user typed
-        token_lower = token.lower()
-        if best_term.lower().startswith(token_lower):
-            suggestion = best_term[len(token_lower):]
-        else:
-            suggestion = best_term
-
-        if not suggestion:
-            # Token exactly matches a term — no completion needed
-            # But still return the code information
-            suggestion = ""
-
-        return AutocompleteResponse(
-            suggestion=suggestion,
-            source=SuggestionSource.TRIE,
-            icd_code=icd_code,
-            snomed_code=snomed_code,
-            loinc_code=loinc_code,
-            confidence=0.95,
-        )
-
     def _stage_lab(self, text: str) -> Optional[AutocompleteResponse]:
-        """Stage 3: Lab pattern detection."""
+        """Stage 2: Lab pattern detection."""
         lab_result = self._lab_engine.detect_lab_pattern(text)
         if not lab_result:
             return None
 
-        # Map severity to LabFlag enum
         severity_to_flag = {
             Severity.LOW: LabFlag.LOW,
             Severity.HIGH: LabFlag.HIGH,
@@ -234,6 +157,64 @@ class Orchestrator:
             confidence=1.0,
             lab_flag=severity_to_flag.get(lab_result.severity, LabFlag.NORMAL),
         )
+
+    def _stage_trie(self, token: str, full_text: str) -> Optional[AutocompleteResponse]:
+        """Stage 3B: MARISA-Trie prefix search."""
+        # Search trie
+        results = self._dictionary.search_prefix(token, max_results=5)
+        if not results:
+            return None
+
+        # Dictionary returns list of: (term, icd_code, snomed_code, loinc_code)
+        best_match = results[0]
+        best_term = best_match[0]
+        
+        # Calculate completion (what needs to be added)
+        token_lower = token.lower()
+        if best_term.lower().startswith(token_lower):
+            suggestion = best_term[len(token_lower):]
+        else:
+            suggestion = best_term # Should rare happen with prefix search
+
+        return AutocompleteResponse(
+            suggestion=suggestion,
+            source=SuggestionSource.TRIE,
+            icd_code=best_match[1],
+            snomed_code=best_match[2],
+            loinc_code=best_match[3],
+            confidence=0.95,
+        )
+
+    async def _stage_umls(self, token: str) -> Optional[AutocompleteResponse]:
+        """Stage 3A: UMLS REST API (Optional)."""
+        if not self._umls or not self._umls.is_available:
+            return None
+        
+        try:
+            results = await self._umls.search(token, max_results=1)
+            if not results:
+                return None
+            
+            best_match = results[0]
+            best_term = best_match[0]
+
+            token_lower = token.lower()
+            if best_term.lower().startswith(token_lower):
+                suggestion = best_term[len(token_lower):]
+            else:
+                suggestion = best_term
+
+            return AutocompleteResponse(
+                suggestion=suggestion,
+                source=SuggestionSource.UMLS,
+                icd_code=best_match[1],
+                snomed_code=best_match[2],
+                loinc_code=best_match[3],
+                confidence=0.95,
+            )
+        except Exception as e:
+            logger.warning(f"UMLS lookup failed: {e}")
+            return None
 
     async def _stage_llm(
         self, text: str, context_window: int
@@ -253,18 +234,22 @@ class Orchestrator:
 
     @staticmethod
     def _extract_last_token(text: str) -> str:
-        """
-        Extract the last word/token from the text.
-        Handles punctuation boundaries (colons, commas, etc.).
-        """
+        """Extract the last word/token."""
         text = text.rstrip()
         if not text:
             return ""
-
-        # Split on whitespace and common delimiters, keep the last token
-        import re
         tokens = re.split(r"[\s,;]+", text)
         return tokens[-1] if tokens else ""
+
+    @staticmethod
+    def _extract_last_phrase(text: str, max_words: int = 3) -> str:
+        """Extract last N words."""
+        text = text.rstrip()
+        if not text:
+            return ""
+        tokens = re.split(r"[\s,;]+", text)
+        tokens = [t for t in tokens if t]
+        return " ".join(tokens[-max_words:]).lower()
 
     @staticmethod
     def _log_latency(stage: str, start: float) -> None:
