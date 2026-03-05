@@ -55,3 +55,9 @@ data/raw/*.gz
 .coverage
 htmlcov/
 .mypy_cache/
+
+
+data/raw/
+data/compiled/
+*.RRF
+*.bin
