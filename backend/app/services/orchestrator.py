@@ -31,6 +31,9 @@ from app.services.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
 
+# Pre-compiled regex for token splitting (avoids recompilation per request)
+_TOKEN_SPLIT_RE = re.compile(r"[\s,;]+")
+
 
 class Orchestrator:
     """
@@ -130,15 +133,31 @@ class Orchestrator:
         """Stage 2a: UMLS REST API live lookup (primary)."""
         if not self._umls or not self._umls.is_available:
             return None
+        if len(token) < 5:
+            return None
 
         try:
             results = await self._umls.search(token, max_results=5)
+            logger.warning("UMLS raw results for '%s': %s", token, results)
             if not results:
                 return None
 
-            # Pick the best match (shortest term)
-            results.sort(key=lambda r: len(r[0]))
-            best_term, icd_code, snomed_code, loinc_code = results[0]
+            # Pick best match — prefer common medical terms starting with prefix
+            token_lower = token.lower()
+            starts_with = [
+                r for r in results 
+                if r[0].lower().startswith(token_lower)
+                and len(r[0].split()) <= 4
+                and not any(c in r[0] for c in [':', '{', '.', '/'])
+                and len(r[0]) >= len(token) + 2  # must add at least 2 chars
+                and r[0].lower() != token_lower  # skip exact matches
+                and ' ' in r[0]  # must be at least two words (real medical terms)
+            ]
+            if starts_with:
+                starts_with.sort(key=lambda r: len(r[0]))
+                best_term, icd_code, snomed_code, loinc_code = starts_with[0]
+            else:
+                return None
 
             token_lower = token.lower()
             if best_term.lower().startswith(token_lower):
@@ -146,16 +165,20 @@ class Orchestrator:
             else:
                 suggestion = best_term
 
+            # Guard: skip empty suggestions (exact match, nothing to complete)
+            if not suggestion:
+                return None
+
             return AutocompleteResponse(
                 suggestion=suggestion,
-                source=SuggestionSource.TRIE,
+                source=SuggestionSource.UMLS,
                 icd_code=icd_code,
                 snomed_code=snomed_code,
                 loinc_code=loinc_code,
                 confidence=0.95,
             )
         except Exception as e:
-            logger.debug("UMLS stage error: %s", e)
+            logger.warning("UMLS stage error: %s", e)
             return None
 
     def _stage_trie(
@@ -177,10 +200,9 @@ class Orchestrator:
             suggestion = best_term
 
         if not suggestion:
-            # Token exactly matches a term — no further completion possible.
-            # Return None so the pipeline falls through to the next stage
-            # (lab engine / LLM) rather than short-circuiting with an empty result.
-            return None
+            # Token exactly matches a term — no completion needed
+            # But still return the code information
+            suggestion = ""
 
         return AutocompleteResponse(
             suggestion=suggestion,
@@ -241,6 +263,7 @@ class Orchestrator:
             return ""
 
         # Split on whitespace and common delimiters, keep the last token
+        import re
         tokens = re.split(r"[\s,;]+", text)
         return tokens[-1] if tokens else ""
 

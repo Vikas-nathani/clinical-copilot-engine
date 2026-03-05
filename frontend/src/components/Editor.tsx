@@ -40,6 +40,7 @@ const editorConfig = {
 const SOURCE_STYLES: Record<string, { bg: string; label: string }> = {
   abbreviation: { bg: "bg-emerald-100 text-emerald-800", label: "Abbreviation" },
   trie: { bg: "bg-blue-100 text-blue-800", label: "Medical Term" },
+  umls: { bg: "bg-cyan-100 text-cyan-800", label: "UMLS Concept" },
   lab_engine: { bg: "bg-amber-100 text-amber-800", label: "Lab Warning" },
   llm: { bg: "bg-purple-100 text-purple-800", label: "AI Suggestion" },
 };
@@ -73,6 +74,25 @@ function AutocompletePlugin({
         editor.update(() => {
           const selection = $getSelection();
           if ($isRangeSelection(selection)) {
+            // For abbreviation/umls sources the backend returns the full
+            // term (e.g. "hypertension" for "htn").  We need to select the
+            // trigger word backwards so insertText *replaces* it instead
+            // of appending.
+            const src = suggestion?.source;
+            if (src === "abbreviation" || src === "umls") {
+              const anchor = selection.anchor;
+              const textContent = anchor.getNode().getTextContent();
+              const textBefore = textContent.slice(0, anchor.offset);
+              const match = textBefore.match(/\S+$/);
+              const triggerLen = match ? match[0].length : 0;
+
+              if (triggerLen > 0) {
+                // Extend selection backward to cover the trigger word
+                const newOffset = anchor.offset - triggerLen;
+                selection.anchor.set(anchor.key, newOffset, anchor.type);
+                // focus stays at the original cursor position
+              }
+            }
             selection.insertText(accepted);
           }
         });

@@ -16,7 +16,7 @@ export interface AutocompleteRequest {
 
 export interface AutocompleteResponse {
   suggestion: string | null;
-  source: "abbreviation" | "trie" | "lab_engine" | "llm" | null;
+  source: "abbreviation" | "trie" | "umls" | "lab_engine" | "llm" | null;
   icd_code: string | null;
   snomed_code: string | null;
   loinc_code: string | null;
