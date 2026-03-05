@@ -47,7 +47,7 @@ class SuggestRequest(BaseModel):
         description="The full text content from the clinical note editor.",
         examples=["patient has diab"],
     )
-    cursor_position: int = Field(
+    cursor_position: None = Field(
         ...,
         ge=0,
         description="0-indexed cursor position within the text.",
