@@ -42,7 +42,6 @@ BUILTIN_ABBREVIATIONS: Dict[str, Dict] = {
     "vfib": {"term": "ventricular fibrillation", "icd": "I49.01", "snomed": "71908006"},
     "pvd": {"term": "peripheral vascular disease", "icd": "I73.9", "snomed": "400047006"},
     "pad": {"term": "peripheral arterial disease", "icd": "I73.9", "snomed": "399957001"},
-    "dvt": {"term": "deep vein thrombosis", "icd": "I82.40", "snomed": "128053003"},
     "pe": {"term": "pulmonary embolism", "icd": "I26.99", "snomed": "59282003"},
     "aaa": {"term": "abdominal aortic aneurysm", "icd": "I71.4", "snomed": "233985008"},
     "avr": {"term": "aortic valve replacement", "icd": "Z95.2", "snomed": "119564002"},
@@ -103,7 +102,6 @@ BUILTIN_ABBREVIATIONS: Dict[str, Dict] = {
     "cxr": {"term": "chest X-ray", "icd": None, "snomed": "399208008"},
     "ct": {"term": "computed tomography", "icd": None, "snomed": "77477000"},
     "ctpa": {"term": "CT pulmonary angiography", "icd": None, "snomed": "418891003"},
-    "tb": {"term": "tuberculosis", "icd": "A15.9", "snomed": "56717001"},
     "ppd": {"term": "purified protein derivative (tuberculin test)", "icd": None, "snomed": "28364001"},
     "neb": {"term": "nebulizer treatment", "icd": None, "snomed": "44868003"},
     "bipap": {"term": "bilevel positive airway pressure", "icd": None, "snomed": "243142003"},
@@ -138,7 +136,6 @@ BUILTIN_ABBREVIATIONS: Dict[str, Dict] = {
     "bun": {"term": "blood urea nitrogen", "icd": None, "snomed": "105011006"},
     "cr": {"term": "creatinine", "icd": None, "snomed": "70901006"},
     "hd": {"term": "hemodialysis", "icd": "Z99.2", "snomed": "302497006"},
-    "uti": {"term": "urinary tract infection", "icd": "N39.0", "snomed": "68566005"},
     "ua": {"term": "urinalysis", "icd": None, "snomed": "27171005"},
     "rta": {"term": "renal tubular acidosis", "icd": "N25.89", "snomed": "236461000"},
 
@@ -205,7 +202,6 @@ BUILTIN_ABBREVIATIONS: Dict[str, Dict] = {
     "ssi": {"term": "surgical site infection", "icd": "T81.49XA", "snomed": "433202001"},
     "sirs": {"term": "systemic inflammatory response syndrome", "icd": "R65.10", "snomed": "238150007"},
     "bc": {"term": "blood culture", "icd": None, "snomed": "30088009"},
-    "abx": {"term": "antibiotics", "icd": None, "snomed": "255631004"},
 
     # ── Musculoskeletal / Rheumatology ──────────────────────────────
     "oa": {"term": "osteoarthritis", "icd": "M19.90", "snomed": "396275006"},

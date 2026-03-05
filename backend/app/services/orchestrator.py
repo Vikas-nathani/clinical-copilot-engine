@@ -200,8 +200,9 @@ class Orchestrator:
             suggestion = best_term
 
         if not suggestion:
-            # Token exactly matches a term — no completion to offer
-            return None
+            # Token exactly matches a term — no completion needed
+            # But still return the code information
+            suggestion = ""
 
         return AutocompleteResponse(
             suggestion=suggestion,
@@ -262,7 +263,8 @@ class Orchestrator:
             return ""
 
         # Split on whitespace and common delimiters, keep the last token
-        tokens = _TOKEN_SPLIT_RE.split(text)
+        import re
+        tokens = re.split(r"[\s,;]+", text)
         return tokens[-1] if tokens else ""
 
     @staticmethod
